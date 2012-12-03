@@ -23,6 +23,7 @@ dest_user, dest_server = dest_server.split('@') if dest_server =~ /@/
 $log = Logger.new STDOUT
 
 # open sftp connection before running find
+$log.info "Opening connection to #{dest_server} as #{dest_user}"
 sftp = Net::SFTP.start(dest_server, dest_user)
 
 # retrieve id of remote
@@ -34,10 +35,11 @@ rescue
   $log.info "Setting up destination for initial use"
   # if remote doesn't exist, create new id and upload and create directory structure
   id = SecureRandom.uuid + "\n"
-  sftp.mkdir!(archive_path)
-  sftp.mkdir!("#{archive_path}/files")
-  sftp.mkdir!("#{archive_path}/manifests")
-  sftp.upload!(StringIO.new(id), id_file)
+  $log.debug "Creating #{archive_path} on remote"
+  sftp.mkdir! archive_path
+  sftp.mkdir! "#{archive_path}/files"
+  sftp.mkdir! "#{archive_path}/manifests"
+  sftp.upload! StringIO.new(id), id_file
 end
 
 # figure out the "local data" path
@@ -51,15 +53,37 @@ if File.exists? md5_cache_file
 else
   md5_cache = {}
 end
+$log.info "Finding all files"
 
-# figure out which new files need to be uploaded
-candidate_files = []
-
-$log.info "Calculating md5s"
-
+file_list = []
 Find.find( source_path ) do |path|
   next unless File.file?( path )
-  md5 = md5_cache[ [path, File.mtime(path)] ] ||= Digest::MD5.file(path).to_s
+  file_list << path
+end
+
+$log.info "Found #{file_list.size} files"
+
+# calculate md5
+candidate_files = []
+needs_md5 = []
+
+file_list.each do |path|
+  id = [path, File.mtime(path)]
+  md5 = md5_cache[id]
+  if md5
+    candidate_files << [ path, md5 ]
+  else
+    needs_md5 << id
+  end
+end
+
+$log.info "Calculating MD5 for #{needs_md5.size} files"
+needs_md5.each do |id|
+  path, mtime = id
+
+  $log.debug "MD5 for #{path}"
+  md5 = Digest::MD5.file(path).to_s
+  md5_cache[id] = md5
   candidate_files << [ path, md5 ]
 end
 
@@ -72,14 +96,19 @@ if File.exists? "#{data_dir}/archived"
 else
   archived = {}
 end
-$log.info "Seeing what is not on the remote backup"
-files_to_upload = []
+needs_check = []
 
 candidate_files.each do |file|
   path, md5 = file
   next if archived[md5]
+  needs_check << file
+end
+
+$log.info "Checking #{needs_check.size} files remotely"
+files_to_upload = []
+needs_check.each do |file|
+  path, md5 = file
   dest_path = "#{archive_path}/files/#{md5}"
-  puts "Checking for #{path} => #{dest_path}"
   begin
     sftp.stat!( dest_path )
     archived[md5] = true
@@ -90,22 +119,28 @@ candidate_files.each do |file|
   files_to_upload << file
 end
 
+$log.info "Counting up backup size"
+backup_size = 0
+files_to_upload.each do |file|
+  path, md5 = file
+  backup_size += File.size path
+end
+
 # save archive cache to disk
 File.binwrite("#{data_dir}/archived", Marshal.dump(archived))
 
-$log.info "Backing up files"
+$log.info "Backing up #{files_to_upload.size} files (#{(backup_size.to_f/1024/1024).round} MB)"
 files_to_upload.each do |file|
   path, md5 = file
 
   # FIXME double-check that the file hasn't changed
   dest_path = "#{archive_path}/files/#{md5}"
-  puts "Uploading #{path} to #{dest_path}"
+  $log.debug "Uploading #{path} to #{dest_path} (#{(File.size(path).to_f/1024/1024).round} MB)"
   sftp.upload! path, dest_path
 end
 
 
-$log.info "Uploading manifest"
-
 manifest = YAML::dump( candidate_files )
+$log.info "Uploading manifest (#{(manifest.size.to_f/1024).round} KB)"
 
 sftp.upload! StringIO.new(manifest), "#{archive_path}/manifests/#{manifest_id}"
