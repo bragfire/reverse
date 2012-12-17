@@ -136,6 +136,8 @@ files_to_upload.each do |file|
   # FIXME double-check that the file hasn't changed
   dest_path = "#{archive_path}/files/#{md5}"
   $log.debug "Uploading #{path} to #{dest_path} (#{(File.size(path).to_f/1024/1024).round} MB)"
+
+  # FIXME Upload and then rename
   sftp.upload! path, dest_path
 end
 
