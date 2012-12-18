@@ -111,6 +111,8 @@ end
 
 $log.info "Checking #{needs_check.size} files remotely"
 files_to_upload = []
+files_to_upload_by_md5 = {}
+
 needs_check.each do |file|
   path, md5 = file
   dest_path = "#{archive_path}/files/#{md5}"
@@ -121,7 +123,12 @@ needs_check.each do |file|
   rescue
   end
 
+  if files_to_upload_by_md5[md5]
+    $log.info "Skipping #{path.inspect} as it matches #{files_to_upload_by_md5[md5].inspect}"
+    next
+  end
   files_to_upload << file
+  files_to_upload_by_md5[md5] = path
 end
 
 $log.info "Counting up backup size"
@@ -142,10 +149,10 @@ files_to_upload.each do |file|
   dest_path = "#{archive_path}/files/#{md5}"
   $log.debug "Uploading #{path} to #{dest_path} (#{(File.size(path).to_f/1024/1024).round} MB)"
 
-  # FIXME Upload and then rename
-  sftp.upload! path, dest_path
+  # Upload and then rename in case connection is interrupted
+  sftp.upload! path, "#{dest_path}.tmp"
+  sftp.rename! "#{dest_path}.tmp", dest_path
 end
-
 
 manifest = YAML::dump( candidate_files )
 $log.info "Uploading manifest (#{(manifest.size.to_f/1024).round} KB)"
