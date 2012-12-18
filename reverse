@@ -12,8 +12,6 @@ require 'yaml'
 
 manifest_id = Time.new
 
-#+ lock data directory
-
 raise "Wrong number of arguments" unless ARGV.size == 2
 source_path = File.absolute_path( ARGV.shift )
 dest_server, archive_path = ARGV.shift.split( ':' )
@@ -45,6 +43,13 @@ end
 # figure out the "local data" path
 data_dir = "/tmp/reverse/#{id}"
 FileUtils.mkdir_p data_dir
+
+# lock data directory (to prevent multiple occurrences)
+lockfile = File.open( "#{data_dir}/lock", 'w' )
+unless lockfile.flock File::LOCK_EX | File::LOCK_NB
+  $stderr.puts "Lock file is locked by another process"
+  exit -1
+end
 
 # load cache of md5s from disk
 md5_cache_file = "#{data_dir}/md5_cache"
