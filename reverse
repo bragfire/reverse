@@ -151,3 +151,7 @@ manifest = YAML::dump( candidate_files )
 $log.info "Uploading manifest (#{(manifest.size.to_f/1024).round} KB)"
 
 sftp.upload! StringIO.new(manifest), "#{archive_path}/manifests/#{manifest_id}"
+
+File.unlink lockfile.path
+
+sftp.session.shutdown!
