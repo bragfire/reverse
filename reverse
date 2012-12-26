@@ -9,6 +9,44 @@ require 'stringio'
 require 'securerandom'
 require 'fileutils'
 require 'yaml'
+require 'optparse'
+
+$opts = {}
+OptionParser.new do |opts|
+  opts.banner = "Usage: reverse [options] source user@server:/dest_path"
+
+  opts.on '-v', '--verbose', 'Run verbosely' do |v|
+    $opts[:verbose] = v
+  end
+
+  opts.on '--sneakernet-uuid UUID', 'UUID of sneakernet partition' do |v|
+    $opts[:sneakernet_uuid] = v
+  end
+
+  opts.on '--sneakernet-size SIZE', 'Size limit for non-sneakernet transfer' do |v|
+    sizes = {
+      k: 1024,
+      m: 1024 * 1024,
+      g: 1024 * 1024 * 1024,
+      t: 1024 * 1024 * 1024 * 1024
+    }
+
+    v =~ /^(\d+)([kmgt])?/i
+
+    size = $1.to_f
+    if $2
+      size *= sizes[$2.downcase.to_sym]
+    end
+
+    $opts[:sneakernet_size] = size.round
+  end
+end.parse!
+
+def user_error msg
+  $stderr.puts msg
+  exit 1
+end
+
 
 manifest_id = Time.new
 
@@ -19,6 +57,7 @@ dest_user, dest_server = dest_server.split('@') if dest_server =~ /@/
   dest_user ||= ENV['USER']
 
 $log = Logger.new STDOUT
+$log.level = $opts[:verbose] ? Logger::DEBUG : Logger::INFO
 
 # open sftp connection before running find
 $log.info "Opening connection to #{dest_server} as #{dest_user}"
@@ -47,8 +86,7 @@ FileUtils.mkdir_p data_dir
 # lock data directory (to prevent multiple occurrences)
 lockfile = File.open( "#{data_dir}/lock", 'w' )
 unless lockfile.flock File::LOCK_EX | File::LOCK_NB
-  $stderr.puts "Lock file is locked by another process"
-  exit -1
+  error "Lock file is locked by another process"
 end
 
 # load cache of md5s from disk
@@ -131,6 +169,9 @@ needs_check.each do |file|
   files_to_upload_by_md5[md5] = path
 end
 
+# save archive cache to disk
+File.binwrite("#{data_dir}/archived", Marshal.dump(archived))
+
 $log.info "Counting up backup size"
 backup_size = 0
 files_to_upload.each do |file|
@@ -138,10 +179,55 @@ files_to_upload.each do |file|
   backup_size += File.size path
 end
 
-# save archive cache to disk
-File.binwrite("#{data_dir}/archived", Marshal.dump(archived))
+$log.info "Need to back up #{files_to_upload.size} files (#{(backup_size.to_f/1024/1024).round} MB)"
 
-$log.info "Backing up #{files_to_upload.size} files (#{(backup_size.to_f/1024/1024).round} MB)"
+if $opts[:sneakernet_size] && backup_size >= $opts[:sneakernet_size]
+  $log.info "Backup is too big, attempting to sneakernet"
+
+  user_error "No sneakernet UUID given" unless $opts[:sneakernet_uuid]
+
+  dev = "/dev/disk/by-uuid/#{$opts[:sneakernet_uuid]}"
+  unless File.exists? dev
+    user_error "Can't find sneakernet device #{dev}"
+  end
+
+  mp = "/media/#{$opts[:sneakernet_uuid]}"
+  sneakerlock = File.open( "#{mp}.lock", 'w' )
+  unless sneakerlock.flock File::LOCK_EX | File::LOCK_NB
+    error "Sneakernet mount point being used by another process"
+  end
+
+  Dir.mkdir mp unless File.exists? mp
+  if File.stat(mp).dev == File.stat("/media").dev
+    cmd = "mount -o noatime #{dev} #{mp}"
+    system cmd
+    user_error "Can't run #{cmd.inspect}" unless $? == 0
+  end
+
+  sneaker_dest = "#{mp}/#{dest_server}:#{archive_path.gsub('/', '_')}"
+  Dir.mkdir sneaker_dest unless File.exists? sneaker_dest
+  sneaker_dest += "/files"
+  Dir.mkdir sneaker_dest unless File.exists? sneaker_dest
+
+  files_to_upload.each do |file|
+    path, md5 = file
+    dest_path = "#{sneaker_dest}/#{md5}"
+    next if File.exists?(dest_path)
+    $log.debug "Copying #{path} to #{dest_path}"
+    FileUtils.copy path, "#{dest_path}.tmp"
+    File.rename "#{dest_path}.tmp", dest_path
+    File.chmod 0444, dest_path
+  end
+
+  system "umount #{mp}"
+  user_error "Can't umount #{mp}" unless $? == 0
+
+  Dir.rmdir mp
+  File.unlink sneakerlock.path
+  $stderr.puts "Sneakernet drive is ready for transfer"
+  exit
+end
+
 files_to_upload.each do |file|
   path, md5 = file
 
