@@ -14,7 +14,27 @@ require 'optparse'
 $opts = {
   :exclude => [],
 }
-OptionParser.new do |opts|
+
+
+def parse_size
+  sizes = {
+    k: 1024,
+    m: 1024 * 1024,
+    g: 1024 * 1024 * 1024,
+    t: 1024 * 1024 * 1024 * 1024
+  }
+
+  v =~ /^(\d+)([kmgt])?/i
+
+  size = $1.to_f
+  if $2
+    size *= sizes[$2.downcase.to_sym]
+  end
+
+  size.round
+end
+
+option_parser = OptionParser.new do |opts|
   opts.banner = "Usage: reverse [options] source user@server:/dest_path"
 
   opts.on '-v', '--verbose', 'Run verbosely' do |v|
@@ -26,21 +46,7 @@ OptionParser.new do |opts|
   end
 
   opts.on '--sneakernet-size SIZE', 'Size limit for non-sneakernet transfer' do |v|
-    sizes = {
-      k: 1024,
-      m: 1024 * 1024,
-      g: 1024 * 1024 * 1024,
-      t: 1024 * 1024 * 1024 * 1024
-    }
-
-    v =~ /^(\d+)([kmgt])?/i
-
-    size = $1.to_f
-    if $2
-      size *= sizes[$2.downcase.to_sym]
-    end
-
-    $opts[:sneakernet_size] = size.round
+    $opts[:sneakernet_size] = parse_size v
   end
 
   opts.on '--exclude GLOB', 'Glob of files to exclude' do |v|
@@ -50,7 +56,21 @@ OptionParser.new do |opts|
   opts.on '--include GLOB', 'Glob of files to exclude' do |v|
     $opts[:exclude] << v
   end
-end.parse!
+
+  opts.on '--config FILE', 'File containing command-line arguments' do |v|
+    $opts[:config] = v
+  end
+
+  opts.on '--source PATH', 'Path to source directory' do |v|
+    $opts[:source] = v
+  end
+
+  opts.on '--dest USER@SERVER:PATH', 'Path to destination directory' do |v|
+    $opts[:dest] = v
+  end
+end
+
+option_parser.parse!
 
 def user_error msg
   $stderr.puts msg
@@ -59,9 +79,29 @@ end
 
 manifest_id = Time.new
 
-raise "Wrong number of arguments" unless ARGV.size == 2
-source_path = File.absolute_path( ARGV.shift )
-dest_server, archive_path = ARGV.shift.split( ':' )
+if $opts[:config]
+  data = File.readlines($opts[:config])
+  config = []
+  data.each do |line|
+    next if line =~ /^\s*#|^\s*$/ # skip comments and whitespace
+    user_error "Invalid config line: #{line.inspect}" unless line =~ /^([-\w]+)(\s?=\s?(.*))?$/
+    if $2
+      config << "--#$1=#$3"
+    else
+      config << "--#$1"
+    end
+  end
+  option_parser.parse! config
+else
+  unless $opts[:source] && $opts[:dest]
+    raise "Wrong number of arguments" unless ARGV.size == 2
+    $opts[:source] = ARGV.shift
+    $opts[:dest] = ARGV.shift
+  end
+end
+
+source_path = File.absolute_path( $opts[:source] )
+dest_server, archive_path = $opts[:dest].split( ':' )
 dest_user, dest_server = dest_server.split('@') if dest_server =~ /@/
   dest_user ||= ENV['USER']
 
