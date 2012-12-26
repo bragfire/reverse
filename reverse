@@ -11,7 +11,9 @@ require 'fileutils'
 require 'yaml'
 require 'optparse'
 
-$opts = {}
+$opts = {
+  :exclude => [],
+}
 OptionParser.new do |opts|
   opts.banner = "Usage: reverse [options] source user@server:/dest_path"
 
@@ -40,13 +42,20 @@ OptionParser.new do |opts|
 
     $opts[:sneakernet_size] = size.round
   end
+
+  opts.on '--exclude GLOB', 'Glob of files to exclude' do |v|
+    $opts[:exclude] << v
+  end
+
+  opts.on '--include GLOB', 'Glob of files to exclude' do |v|
+    $opts[:exclude] << v
+  end
 end.parse!
 
 def user_error msg
   $stderr.puts msg
   exit 1
 end
-
 
 manifest_id = Time.new
 
@@ -86,7 +95,7 @@ FileUtils.mkdir_p data_dir
 # lock data directory (to prevent multiple occurrences)
 lockfile = File.open( "#{data_dir}/lock", 'w' )
 unless lockfile.flock File::LOCK_EX | File::LOCK_NB
-  error "Lock file is locked by another process"
+  user_error "Lock file is locked by another process"
 end
 
 # load cache of md5s from disk
@@ -100,6 +109,25 @@ $log.info "Finding all files"
 
 file_list = []
 Find.find( source_path ) do |path|
+  partial_path = path.sub source_path, ''
+  next if partial_path.empty?
+  partial_path.sub! '/', ''
+
+  skip = false
+  $opts[:exclude].each do |glob|
+    rooted = "**/#{glob}" unless glob =~ /\A(\/|\*\*)/
+    if File.fnmatch rooted, partial_path, File::FNM_PATHNAME
+      skip = true
+      $log.debug "Exclude #{glob.inspect} =~ #{path.inspect}"
+      break
+    end
+  end
+
+  if skip
+    Find.prune
+    next
+  end
+
   next unless File.file?( path )
   file_list << path
 end
@@ -194,7 +222,7 @@ if $opts[:sneakernet_size] && backup_size >= $opts[:sneakernet_size]
   mp = "/media/#{$opts[:sneakernet_uuid]}"
   sneakerlock = File.open( "#{mp}.lock", 'w' )
   unless sneakerlock.flock File::LOCK_EX | File::LOCK_NB
-    error "Sneakernet mount point being used by another process"
+    user_error "Sneakernet mount point being used by another process"
   end
 
   Dir.mkdir mp unless File.exists? mp
