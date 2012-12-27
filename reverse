@@ -159,10 +159,10 @@ file_list = []
 Find.find( source_path ) do |path|
   partial_path = path.sub source_path, ''
   next if partial_path.empty?
-  partial_path.sub! '/', ''
 
   skip = false
   $opts[:exclude].each do |glob|
+    rooted = glob
     rooted = "**/#{glob}" unless glob =~ /\A(\/|\*\*)/
     if File.fnmatch rooted, partial_path, File::FNM_PATHNAME
       skip = true
