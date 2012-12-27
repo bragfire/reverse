@@ -83,7 +83,9 @@ if $opts[:config]
   config_path = $opts[:config]
   unless File.exists? config_path
     config_path = "/etc/reverse/#{config_path}.conf"
-    user_error "No such config file: #{$opts[:config]}"
+    unless File.exists? config_path
+      user_error "No such config file: #{$opts[:config]}"
+    end
   end
 
   data = File.readlines config_path
