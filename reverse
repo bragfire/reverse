@@ -16,7 +16,7 @@ $opts = {
 }
 
 
-def parse_size
+def parse_size str
   sizes = {
     k: 1024,
     m: 1024 * 1024,
@@ -24,7 +24,7 @@ def parse_size
     t: 1024 * 1024 * 1024 * 1024
   }
 
-  v =~ /^(\d+)([kmgt])?/i
+  str =~ /^(\d+)([kmgt])?/i
 
   size = $1.to_f
   if $2
