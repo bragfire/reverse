@@ -114,7 +114,7 @@ dest_user, dest_server = dest_server.split('@') if dest_server =~ /@/
   dest_user ||= ENV['USER']
 
 $log = Logger.new STDOUT
-$log.level = $opts[:verbose] ? Logger::DEBUG : Logger::INFO
+$log.level = $opts[:verbose] ? Logger::DEBUG : Logger::WARNING
 
 # open sftp connection before running find
 $log.info "Opening connection to #{dest_server} as #{dest_user}"
@@ -137,7 +137,7 @@ rescue
 end
 
 # figure out the "local data" path
-data_dir = "/tmp/reverse/#{id}"
+data_dir = "/var/local/reverse/#{id}"
 FileUtils.mkdir_p data_dir
 
 # lock data directory (to prevent multiple occurrences)
