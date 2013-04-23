@@ -114,7 +114,7 @@ dest_user, dest_server = dest_server.split('@') if dest_server =~ /@/
   dest_user ||= ENV['USER']
 
 $log = Logger.new STDOUT
-$log.level = $opts[:verbose] ? Logger::DEBUG : Logger::WARNING
+$log.level = $opts[:verbose] ? Logger::DEBUG : Logger::WARN
 
 # open sftp connection before running find
 $log.info "Opening connection to #{dest_server} as #{dest_user}"
