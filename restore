@@ -1,0 +1,24 @@
+#!/usr/bin/env ruby
+#
+# Create a complete, readable tree of the latest backup in a directory called
+# "hardlinks"
+
+require 'yaml'
+require 'fileutils'
+
+manifests = Dir.glob "manifests/*"
+latest = manifests.sort.last
+manifest = YAML::load( File.read(latest) )
+
+puts "Creating #{manifest.size} files"
+
+FileUtils.mkdir_p "hardlinks"
+
+manifest.each do |file|
+  path, md5 = file
+  source = "files/#{md5}"
+  dest = "hardlinks/#{path}"
+  FileUtils.mkdir_p File.dirname(dest)
+  File.link source, dest
+  File.chmod 0444, dest
+end
